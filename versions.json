@@ -1,0 +1,27 @@
+{
+  "platforms": {
+    "windows-x86_64": {
+      "current_version": "0.0.3",
+      "url": "https://testing.com/file.exe",
+      "signature": "ueJdsjf+0343djkfdjsajk2sdf3+qweewewerASFDwq==",
+      "pub_date": "2025-05-03T10:00:00Z",
+      "notes": "Notas de actualización 3",
+      "version_history": [
+        {
+          "version": "0.0.1",
+          "url": "https://testing.com/file.exe",
+          "signature": "ueJdsjf+0343djkfdjsajk2sdf3+qweqwewerDSFDwq==",
+          "pub_date": "2025-05-01T10:00:00Z",
+          "notes": "Notas de actualización"
+        },
+        {
+          "version": "0.0.2",
+          "url": "https://testing.com/file.exe",
+          "signature": "ueJdsjf+0343djkfdjsajk2sdf3+qweewewerDSFDwq==",
+          "pub_date": "2025-05-02T10:00:00Z",
+          "notes": "Notas de actualización 2"
+        }
+      ]
+    }
+  }
+}

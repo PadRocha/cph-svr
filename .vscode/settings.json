@@ -1,0 +1,12 @@
+// .vscode/settings.json
+{
+  "json.schemas": [
+    {
+      // Coincide con el nombre del archivo de datos donde quieres aplicar el esquema
+      "fileMatch": ["versions.json"],
+
+      // Ruta a tu archivo de esquema (puede ser relativa al workspace)
+      "url": "./src/config/versions.schema.json"
+    }
+  ]
+}
