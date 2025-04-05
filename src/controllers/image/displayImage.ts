@@ -4,6 +4,16 @@ import { InternalServerError, NotFoundError } from "errors";
 import { factory } from "factory";
 import sharp from "sharp";
 
+// Función auxiliar para calcular el ETag (usando SHA-1)
+async function calculateETag(buffer: Uint8Array): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest("SHA-1", buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `"${hashHex}"`;
+}
+
 type ImageMode = "PLACEHOLDER" | "HIGH" | "LOW";
 const MODES = ["PLACEHOLDER", "HIGH", "LOW"];
 const isValidMode = (val: string): val is ImageMode => MODES.includes(val);
@@ -21,10 +31,17 @@ export default factory.createHandlers(async ({ req, get, body }) => {
     throw new NotFoundError("Imagen no encontrada");
   }
 
+  // Obtener información del archivo original para Last-Modified
+  const fileInfo = await Deno.stat(originalPath);
+  const lastModified = fileInfo.mtime
+    ? fileInfo.mtime.toUTCString()
+    : new Date().toUTCString();
+
   const transform = sharp(originalPath);
   if (mode === "PLACEHOLDER") {
     const height = setup.IMAGE.SIZE[mode];
-    const output = await transform.resize({ height, fit: "cover" })
+    const output = await transform
+      .resize({ height, fit: "cover" })
       .avif({
         quality: QUALITY,
         effort: EFFORT,
@@ -32,11 +49,29 @@ export default factory.createHandlers(async ({ req, get, body }) => {
         chromaSubsampling: CHROMA,
       })
       .toBuffer();
+    const etag = await calculateETag(output);
+
+    // Validación condicional: si el cliente ya tiene la imagen, devuelve 304
+    if (req.header("if-none-match") === etag) {
+      return body(null, { status: 304, headers: { "ETag": etag } });
+    }
+    if (req.header("if-modified-since")) {
+      const ims = new Date(req.header("if-modified-since")!);
+      if (new Date(lastModified) <= ims) {
+        return body(null, {
+          status: 304,
+          headers: { "Last-Modified": lastModified },
+        });
+      }
+    }
+
     return body(output.buffer as ArrayBuffer, {
       status: 200,
       headers: {
         "Content-Type": "image/avif",
-        "Cache-Control": "no-store",
+        "Cache-Control": "no-store", // Para placeholders no se cachea
+        "ETag": etag,
+        "Last-Modified": lastModified,
       },
     });
   }
@@ -51,7 +86,6 @@ export default factory.createHandlers(async ({ req, get, body }) => {
     cacheFile += `_${canvasWidth || ""}x${canvasHeight || ""}`;
   }
   cacheFile += `_${mode}.avif`;
-  const cachePath = resolve(cacheDir, cacheFile);
 
   if (!existsSync(cacheDir)) {
     await Deno.mkdir(cacheDir, { recursive: true });
@@ -62,20 +96,69 @@ export default factory.createHandlers(async ({ req, get, body }) => {
     }
   }
 
+  const cachePath = resolve(cacheDir, cacheFile);
   if (existsSync(cachePath)) {
     const cached = await Deno.readFile(cachePath);
     await Deno.utime(cachePath, new Date(), new Date());
+    const etag = await calculateETag(cached);
+    const headers: Record<string, string> = {
+      "Content-Type": "image/avif",
+      "Cache-Control": "public, max-age=3600, must-revalidate",
+      "ETag": etag,
+      "Last-Modified": lastModified,
+    };
+    if (req.header("if-none-match") === etag) {
+      return body(null, { status: 304, headers });
+    }
+    if (req.header("if-modified-since")) {
+      const ims = new Date(req.header("if-modified-since")!);
+      if (new Date(lastModified) <= ims) {
+        return body(null, { status: 304, headers });
+      }
+    }
     return body(cached.buffer, {
       status: 200,
-      headers: {
-        "Content-Type": "image/avif",
-      },
+      headers,
     });
   }
+
+  const convertAndReturn = async () => {
+    const output = await transform
+      .avif({
+        quality,
+        effort: EFFORT,
+        lossless: LOSSLESS,
+        chromaSubsampling: CHROMA,
+      })
+      .toBuffer();
+    await Deno.writeFile(cachePath, output);
+    const etag = await calculateETag(output);
+    const headers: Record<string, string> = {
+      "Content-Type": "image/avif",
+      "Cache-Control": "public, max-age=3600, must-revalidate",
+      "ETag": etag,
+      "Last-Modified": lastModified,
+    };
+    if (req.header("if-none-match") === etag) {
+      return body(null, { status: 304, headers });
+    }
+    if (req.header("if-modified-since")) {
+      const ims = new Date(req.header("if-modified-since")!);
+      if (new Date(lastModified) <= ims) {
+        return body(null, { status: 304, headers });
+      }
+    }
+    return body(output.buffer as ArrayBuffer, { status: 200, headers });
+  };
 
   if (!isNaN(canvasWidth) && !isNaN(canvasHeight)) {
     const { width, height } = await transform.metadata();
     if (!width || !height) throw new InternalServerError();
+
+    if (width === canvasWidth && height === canvasHeight) {
+      return convertAndReturn();
+    }
+
     const isNotSquare = width !== height;
     if (isNotSquare && canvasHeight < canvasWidth) {
       const newWidth = Math.round((canvasHeight * width) / height);
@@ -133,29 +216,14 @@ export default factory.createHandlers(async ({ req, get, body }) => {
       });
     }
   } else if (!isNaN(canvasWidth)) {
+    const { width } = await transform.metadata();
+    if (width === canvasWidth) return convertAndReturn();
     transform.resize({ width: canvasWidth, fit: "cover" });
   } else if (!isNaN(canvasHeight)) {
+    const { height } = await transform.metadata();
+    if (height === canvasHeight) return convertAndReturn();
     transform.resize({ height: canvasHeight, fit: "cover" });
   }
 
-  const output = await transform
-    .avif({
-      quality,
-      effort: EFFORT,
-      lossless: LOSSLESS,
-      chromaSubsampling: CHROMA,
-    })
-    .toBuffer();
-  await Deno.writeFile(cachePath, output);
-
-  const headers: Record<string, string> = {
-    "Content-Type": "image/avif",
-  };
-  if (mode === "LOW") {
-    headers["Cache-Control"] = "public, max-age=3600, must-revalidate";
-  }
-  return body(output.buffer as ArrayBuffer, {
-    status: 200,
-    headers,
-  });
+  return convertAndReturn();
 });

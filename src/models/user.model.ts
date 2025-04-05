@@ -3,15 +3,10 @@ import type {
   UserMethods,
   UserModel,
 } from "@interfaces/user.interface.ts";
-import { setup } from "config";
-import { model, Schema } from "mongoose";
+import { setup } from 'config';
+import { model, Schema } from 'mongoose';
 
-import {
-  comparePassword,
-  createToken,
-  preSave,
-  roleIncludes,
-} from "@services/user.service.ts";
+import { comparePassword, createToken, preSave, roleIncludes } from '@services/user.service.ts';
 
 /**
  * Esquema de Mongoose para la entidad 'User'. Define la estructura de los campos,
