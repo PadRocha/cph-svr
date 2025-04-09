@@ -1,8 +1,8 @@
-import { setup } from "config";
-import { BaseError } from "errors";
+import { setup } from 'config';
+import { BaseError } from 'errors';
 
-import { createFactory } from "@hono/hono/factory";
-import { extractErrorDetails } from "@utils/extractErrorDetails.ts";
+import { createFactory } from '@hono/hono/factory';
+import { extractErrorDetails } from '@utils/extractErrorDetails.ts';
 
 import type { UserDocument } from "@interfaces/user.interface.ts";
 

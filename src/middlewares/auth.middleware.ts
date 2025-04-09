@@ -4,6 +4,7 @@ import { jwtVerify } from 'jose';
 import { UserModel } from 'models';
 
 import { createMiddleware as factory } from '@hono/hono/factory';
+import { cacheManager } from '@utils/cache_manager.ts';
 
 /**
  * @apiDefine AuthHeader
@@ -54,18 +55,15 @@ import { createMiddleware as factory } from '@hono/hono/factory';
  */
 export const authMiddleware = factory(async ({ req, set }, next) => {
   const authorization = req.header("Authorization");
-
   const tokenMatch = authorization?.match(/^Bearer\s+([\w.-]+)/);
-
   if (!tokenMatch) {
     throw new BadRequestError("No se ha enviado el token en el encabezado");
   }
 
   const [, token] = tokenMatch;
-
   if (!token) {
     throw new UnauthorizedError(
-      "El usuario no tiene las credenciales necesarias para acceder",
+      "El usuario no tiene las credenciales para acceder",
     );
   }
 
@@ -73,25 +71,38 @@ export const authMiddleware = factory(async ({ req, set }, next) => {
     token,
     new TextEncoder().encode(setup.KEY.SECRET),
   );
-  const user = await UserModel.findById(payload.sub);
 
+  const currDate = Math.floor(Date.now() / 1000);
+  let user = cacheManager.getUser(payload.sub);
   if (!user) {
-    throw new UnauthorizedError("El usuario no existe en el sistema");
+    user = await UserModel
+      .findById(payload.sub)
+      .select("-password_salt -password")
+      .exec();
+    if (!user) {
+      throw new UnauthorizedError("El usuario no existe en el sistema");
+    }
+    // Validar que la información del token coincide con el usuario
+    if (
+      user.role !== payload.role ||
+      user._id.toString() != payload.sub ||
+      (payload.exp && payload.exp <= currDate)
+    ) {
+      throw new UnauthorizedError("Acceso denegado: El token es inválido");
+    }
+    // Guardamos en caché con tiempo de vida = tiempo que falta para que caduque el token
+    const tiempo_restante = (payload.exp ?? 0) - currDate;
+    if (tiempo_restante > 0) {
+      cacheManager.setUser(user._id.toString(), user, tiempo_restante);
+    }
+  } else {
+    // Si encontramos el usuario en la caché, validamos si el token aún no ha expirado
+    if (payload.exp && payload.exp <= currDate) {
+      cacheManager.deleteUser(payload.sub as string);
+      throw new UnauthorizedError("Acceso denegado: El token es inválido");
+    }
   }
-
-  // Validar que la información del token coincide con el usuario
-  if (
-    user.role !== payload.role ||
-    user._id.toString() != payload.sub ||
-    (payload.exp && payload.exp <= Math.floor(Date.now() / 1000))
-  ) {
-    throw new UnauthorizedError(
-      "Acceso denegado: El token es inválido o ha expirado",
-    );
-  }
-
   // Añadir el usuario autenticado al contexto para uso en rutas
   set("user", user);
-
   await next();
 });

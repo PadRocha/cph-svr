@@ -4,14 +4,24 @@ import { InternalServerError, NotFoundError } from "errors";
 import { factory } from "factory";
 import sharp from "sharp";
 
-// Función auxiliar para calcular el ETag (usando SHA-1)
-async function calculateETag(buffer: Uint8Array): Promise<string> {
+/**
+ * Función auxiliar para calcular el hash (SHA-1) de un buffer.
+ * Retorna la cadena sin comillas, por ejemplo: 86968e2192c173cf...
+ */
+async function calculateRawHash(buffer: Uint8Array): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-1", buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray
+  return hashArray
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return `"${hashHex}"`;
+}
+
+/**
+ * Calcula el ETag con comillas; por ejemplo: "86968e2192c173cf..."
+ */
+async function calculateETag(buffer: Uint8Array): Promise<string> {
+  const rawHash = await calculateRawHash(buffer);
+  return `"${rawHash}"`;
 }
 
 type ImageMode = "PLACEHOLDER" | "HIGH" | "LOW";
@@ -22,22 +32,28 @@ export default factory.createHandlers(async ({ req, get, body }) => {
   const location = req.query("location") ?? get("location");
   const key = req.param("key");
   const file = req.param("file");
+  const version = req.query("v") ?? req.query("version") ?? "";
   const raw_mode = req.query("mode") ?? "LOW";
   const mode = isValidMode(raw_mode) ? raw_mode : "LOW";
   const { QUALITY, EFFORT, LOSSLESS, CHROMA } = setup.IMAGE[mode];
   const fileName = `${file}.${setup.IMAGE.EXT}`;
   const originalPath = resolve(location, "assets", key, fileName);
+
   if (!existsSync(originalPath)) {
     throw new NotFoundError("Imagen no encontrada");
   }
 
-  // Obtener información del archivo original para Last-Modified
+  // Obtener info del archivo original para Last-Modified
   const fileInfo = await Deno.stat(originalPath);
   const lastModified = fileInfo.mtime
     ? fileInfo.mtime.toUTCString()
     : new Date().toUTCString();
 
   const transform = sharp(originalPath);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODO PLACEHOLDER
+  // ─────────────────────────────────────────────────────────────────────────────
   if (mode === "PLACEHOLDER") {
     const height = setup.IMAGE.SIZE[mode];
     const output = await transform
@@ -49,19 +65,24 @@ export default factory.createHandlers(async ({ req, get, body }) => {
         chromaSubsampling: CHROMA,
       })
       .toBuffer();
+
     const etag = await calculateETag(output);
 
-    // Validación condicional: si el cliente ya tiene la imagen, devuelve 304
-    if (req.header("if-none-match") === etag) {
-      return body(null, { status: 304, headers: { "ETag": etag } });
-    }
-    if (req.header("if-modified-since")) {
-      const ims = new Date(req.header("if-modified-since")!);
-      if (new Date(lastModified) <= ims) {
+    if (!version) {
+      if (req.header("if-none-match") === etag) {
         return body(null, {
           status: 304,
-          headers: { "Last-Modified": lastModified },
+          headers: { "ETag": etag },
         });
+      }
+      if (req.header("if-modified-since")) {
+        const ims = new Date(req.header("if-modified-since")!);
+        if (new Date(lastModified) <= ims) {
+          return body(null, {
+            status: 304,
+            headers: { "Last-Modified": lastModified },
+          });
+        }
       }
     }
 
@@ -69,24 +90,23 @@ export default factory.createHandlers(async ({ req, get, body }) => {
       status: 200,
       headers: {
         "Content-Type": "image/avif",
-        "Cache-Control": "no-store", // Para placeholders no se cachea
+        "Cache-Control": "public, max-age=300, must-revalidate",
         "ETag": etag,
         "Last-Modified": lastModified,
       },
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODO NO-PLACEHOLDER (HIGH / LOW)
+  // ─────────────────────────────────────────────────────────────────────────────
   const canvasWidth = Number(req.query("width"));
   const canvasHeight = Number(req.query("height"));
   const reqQuality = Number(req.query("quality"));
   const quality = !isNaN(reqQuality) && reqQuality > 0 ? reqQuality : QUALITY;
-  const cacheDir = resolve(location, "assets", key, ".cache");
-  let cacheFile = `${file}_q${quality}`;
-  if (canvasWidth || canvasHeight) {
-    cacheFile += `_${canvasWidth || ""}x${canvasHeight || ""}`;
-  }
-  cacheFile += `_${mode}.avif`;
 
+  // Ruta .cache
+  const cacheDir = resolve(location, "assets", key, ".cache");
   if (!existsSync(cacheDir)) {
     await Deno.mkdir(cacheDir, { recursive: true });
     if (Deno.build.os === "windows") {
@@ -96,10 +116,22 @@ export default factory.createHandlers(async ({ req, get, body }) => {
     }
   }
 
+  let cacheFile = `${file}_q${quality}`;
+  if (canvasWidth || canvasHeight) {
+    cacheFile += `_${canvasWidth || ""}x${canvasHeight || ""}`;
+  }
+  cacheFile += `_${mode}.avif`;
+
   const cachePath = resolve(cacheDir, cacheFile);
+  if (version && existsSync(cachePath)) {
+    await Deno.remove(cachePath);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // EXISTE EL ARCHIVO EN EL .cache?
+  // ─────────────────────────────────────────────────────────────────────────────
   if (existsSync(cachePath)) {
     const cached = await Deno.readFile(cachePath);
-    await Deno.utime(cachePath, new Date(), new Date());
     const etag = await calculateETag(cached);
     const headers: Record<string, string> = {
       "Content-Type": "image/avif",
@@ -107,21 +139,28 @@ export default factory.createHandlers(async ({ req, get, body }) => {
       "ETag": etag,
       "Last-Modified": lastModified,
     };
-    if (req.header("if-none-match") === etag) {
-      return body(null, { status: 304, headers });
-    }
-    if (req.header("if-modified-since")) {
-      const ims = new Date(req.header("if-modified-since")!);
-      if (new Date(lastModified) <= ims) {
+
+    if (!version) {
+      if (req.header("if-none-match") === etag) {
         return body(null, { status: 304, headers });
       }
+      if (req.header("if-modified-since")) {
+        const ims = new Date(req.header("if-modified-since")!);
+        if (new Date(lastModified) <= ims) {
+          return body(null, { status: 304, headers });
+        }
+      }
     }
+
     return body(cached.buffer, {
       status: 200,
       headers,
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // NO EXISTE EL ARCHIVO => LO PROCESAMOS Y GUARDAMOS
+  // ─────────────────────────────────────────────────────────────────────────────
   const convertAndReturn = async () => {
     const output = await transform
       .avif({
@@ -132,6 +171,7 @@ export default factory.createHandlers(async ({ req, get, body }) => {
       })
       .toBuffer();
     await Deno.writeFile(cachePath, output);
+
     const etag = await calculateETag(output);
     const headers: Record<string, string> = {
       "Content-Type": "image/avif",
@@ -139,18 +179,25 @@ export default factory.createHandlers(async ({ req, get, body }) => {
       "ETag": etag,
       "Last-Modified": lastModified,
     };
-    if (req.header("if-none-match") === etag) {
-      return body(null, { status: 304, headers });
-    }
-    if (req.header("if-modified-since")) {
-      const ims = new Date(req.header("if-modified-since")!);
-      if (new Date(lastModified) <= ims) {
+
+    if (!version) {
+      if (req.header("if-none-match") === etag) {
         return body(null, { status: 304, headers });
       }
+      if (req.header("if-modified-since")) {
+        const ims = new Date(req.header("if-modified-since")!);
+        if (new Date(lastModified) <= ims) {
+          return body(null, { status: 304, headers });
+        }
+      }
     }
+
     return body(output.buffer as ArrayBuffer, { status: 200, headers });
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Manejo de resize/extract/extend
+  // ─────────────────────────────────────────────────────────────────────────────
   if (!isNaN(canvasWidth) && !isNaN(canvasHeight)) {
     const { width, height } = await transform.metadata();
     if (!width || !height) throw new InternalServerError();

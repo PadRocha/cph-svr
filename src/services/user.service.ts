@@ -72,7 +72,7 @@ export async function createToken(this: UserDocument): Promise<string> {
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: setup.KEY.ALG })
     .setIssuedAt()
-    .setExpirationTime("30d")
+    .setExpirationTime("1d")
     .sign(new TextEncoder().encode(setup.KEY.SECRET));
 }
 

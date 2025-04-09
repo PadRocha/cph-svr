@@ -3,12 +3,12 @@ import type {
   LeanItem,
   PopulatedItem,
 } from "@interfaces/item.interface.ts";
-import { pipeline } from "aggregate";
-import { Aggregate, isValidObjectId, Types } from "deps";
-import { ItemModel } from "models";
-import { pattern } from "regex";
+import { pipeline } from 'aggregate';
+import { Aggregate, isValidObjectId, Types } from 'deps';
+import { ItemModel } from 'models';
+import { pattern } from 'regex';
 
-import { damerauLevenshteinDistance } from "@utils/levenshteinDistance.ts";
+import { damerauLevenshteinDistance } from '@utils/levenshteinDistance.ts';
 
 /**
  * Busca un ítem en la colección utilizando su código.
@@ -206,14 +206,14 @@ export function getStatus(
     code: string;
     image: LeanItem["images"][number];
   }>()
-    .lookup(pipeline.LOOKUP.KEY).unwind("$key")
-    .lookup(pipeline.LOOKUP.KEY_LINE).unwind("$key.line")
-    .lookup(pipeline.LOOKUP.KEY_BRAND).unwind("$key.brand")
     .unwind("$images")
     .match({
       _id: new Types.ObjectId(_id),
       "images.idN": idN,
     })
+    .lookup(pipeline.LOOKUP.KEY).unwind("$key")
+    .lookup(pipeline.LOOKUP.KEY_LINE).unwind("$key.line")
+    .lookup(pipeline.LOOKUP.KEY_BRAND).unwind("$key.brand")
     .project(pipeline.PROJECT.STATUS);
 }
 
@@ -256,14 +256,14 @@ export function getImage(
     image: LeanItem["images"][number];
     ext: string;
   }>()
-    .lookup(pipeline.LOOKUP.KEY).unwind("$key")
-    .lookup(pipeline.LOOKUP.KEY_LINE).unwind("$key.line")
-    .lookup(pipeline.LOOKUP.KEY_BRAND).unwind("$key.brand")
     .unwind("$images")
     .match({
       _id: new Types.ObjectId(_id),
       "images.idN": idN,
       "images.status": 5,
     })
+    .lookup(pipeline.LOOKUP.KEY).unwind("$key")
+    .lookup(pipeline.LOOKUP.KEY_LINE).unwind("$key.line")
+    .lookup(pipeline.LOOKUP.KEY_BRAND).unwind("$key.brand")
     .project(pipeline.PROJECT.IMAGE);
 }

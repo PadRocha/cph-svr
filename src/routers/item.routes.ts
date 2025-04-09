@@ -51,7 +51,7 @@ itemRoutes.get(
   authMiddleware,
   ...navigateItem,
 );
-itemRoutes.get(
+itemRoutes.put(
   "/status",
   validateId(),
   validateIdN(),
