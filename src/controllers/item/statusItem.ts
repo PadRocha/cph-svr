@@ -11,7 +11,6 @@ export default factory.createHandlers(async ({ req, get, json }) => {
   const idN = Number(req.query("idN"));
   const status = Number(req.query("status"));
   if (isNaN(status)) throw new BadRequestError("Status no definido o inválido");
-
   // Caso especial: eliminar imagen (status === -1)
   if (status === -1) {
     const { modifiedCount: deleted } = await ItemModel.updateOne(
@@ -23,13 +22,11 @@ export default factory.createHandlers(async ({ req, get, json }) => {
     const [data] = await ItemModel.getStatus(_id!, idN);
     return json({ data });
   }
-
   // Validación de rango
   if (status < 0 || status > 5) throw new BadRequestError("Status inválido");
-
   // Intentar actualizar si la imagen ya existe
   const { modifiedCount: updated } = await ItemModel.updateOne(
-    { _id },
+    { _id, "images.idN": idN },
     { $set: { "images.$[img].status": status } },
     { arrayFilters: [{ "img.idN": idN }] },
   );

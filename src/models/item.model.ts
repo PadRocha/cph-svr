@@ -4,12 +4,17 @@ import type {
   ItemMethods,
   ItemModel,
 } from "@interfaces/item.interface.ts";
-import { model, Schema } from 'mongoose';
+import { model, Schema } from "mongoose";
 
 import {
-    findByCode, getBackInfo, getFuzzy, getImage, getPopulate, getStatus
-} from '@services/item.service.ts';
-import { validateExistence } from '@utils/schemaValidators.ts';
+  findByCode,
+  getBackInfo,
+  getFuzzy,
+  getImage,
+  getPopulate,
+  getStatus,
+} from "@services/item.service.ts";
+import { validateExistence } from "@utils/schemaValidators.ts";
 
 /**
  * Esquema de Mongoose para la colección "Item".
@@ -53,10 +58,6 @@ const itemSchema = new Schema<Item, ItemModel, ItemMethods>({
           max: 5,
           default: 0,
           required: true,
-        },
-        ext: {
-          type: String,
-          enum: ["jpg", "jpeg", "png", "webp", "avif"],
         },
       },
     ],

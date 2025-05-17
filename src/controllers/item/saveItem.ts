@@ -88,8 +88,8 @@ export default factory.createHandlers(async ({ req, get, body, json }) => {
   }
 
   const data = await new ItemModel({
-    key: await KeyModel.findByCode(itemData.key),
     ...itemData,
+    key: await KeyModel.findByCode(itemData.key),
   }).save();
   if (!data) {
     return body(null, 204);

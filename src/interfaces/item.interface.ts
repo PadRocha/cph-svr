@@ -23,8 +23,6 @@ interface Image {
    * - 5: Guardado
    */
   readonly status: number;
-  /** Extensión de la imagen */
-  ext: string;
 }
 
 /**

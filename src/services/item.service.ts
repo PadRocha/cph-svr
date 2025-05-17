@@ -3,12 +3,12 @@ import type {
   LeanItem,
   PopulatedItem,
 } from "@interfaces/item.interface.ts";
-import { pipeline } from 'aggregate';
-import { Aggregate, isValidObjectId, Types } from 'deps';
-import { ItemModel } from 'models';
-import { pattern } from 'regex';
+import { pipeline } from "aggregate";
+import { Aggregate, isValidObjectId, Types } from "deps";
+import { ItemModel } from "models";
+import { pattern } from "regex";
 
-import { damerauLevenshteinDistance } from '@utils/levenshteinDistance.ts';
+import { damerauLevenshteinDistance } from "@utils/levenshteinDistance.ts";
 
 /**
  * Busca un ítem en la colección utilizando su código.
@@ -36,6 +36,8 @@ export async function findByCode(
   this: ItemModel,
   code?: Types.ObjectId | string,
 ): Promise<Types.ObjectId | null> {
+  console.log("findByCode", code);
+
   if (isValidObjectId(code) && (await this.exists({ _id: code }))) {
     return new Types.ObjectId(code);
   }
